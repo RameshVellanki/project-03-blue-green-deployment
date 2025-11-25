@@ -1,0 +1,144 @@
+name: Build Custom Image with Packer
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'packer/**'
+      - 'scripts/app/**'
+      - '.github/workflows/build-image.yml'
+  workflow_dispatch:
+
+env:
+  PACKER_VERSION: '1.10.0'
+  GCP_REGION: 'us-central1'
+  GCP_ZONE: 'us-central1-a'
+
+jobs:
+  build-image:
+    name: Build Image
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@main
+        with:
+          version: ${{ env.PACKER_VERSION }}
+
+      - name: Packer Format Check
+        working-directory: ./packer
+        run: packer fmt -check .
+        continue-on-error: true
+
+      - name: Packer Init
+        working-directory: ./packer
+        run: packer init image.pkr.hcl
+
+      - name: Packer Validate
+        working-directory: ./packer
+        env:
+          PKR_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+          PKR_VAR_region: ${{ env.GCP_REGION }}
+          PKR_VAR_zone: ${{ env.GCP_ZONE }}
+        run: packer validate image.pkr.hcl
+
+      - name: Build Image
+        working-directory: ./packer
+        env:
+          PKR_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+          PKR_VAR_region: ${{ env.GCP_REGION }}
+          PKR_VAR_zone: ${{ env.GCP_ZONE }}
+          PKR_VAR_image_version: ${{ github.sha }}
+        run: |
+          echo "Building custom image with Packer..."
+          packer build -color=false image.pkr.hcl | tee packer-output.txt
+
+      - name: Extract Image Name
+        id: image
+        run: |
+          IMAGE_NAME=$(grep -oP 'A disk image was created: \K[^\s]+' packer/packer-output.txt || echo "webapp-image-${{ github.sha }}")
+          echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
+          echo "Built image: $IMAGE_NAME"
+
+      - name: Verify Image
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.image_name }}
+        run: |
+          echo "Verifying image exists..."
+          gcloud compute images describe "$IMAGE_NAME" \
+            --format="table(name,family,status,diskSizeGb,creationTimestamp)"
+
+      - name: Test Image
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.image_name }}
+        run: |
+          echo "Creating test instance from image..."
+          TEST_INSTANCE="test-instance-${{ github.run_number }}"
+          
+          gcloud compute instances create "$TEST_INSTANCE" \
+            --zone="${{ env.GCP_ZONE }}" \
+            --machine-type=e2-micro \
+            --image="$IMAGE_NAME" \
+            --tags=http-server \
+            --scopes=cloud-platform
+          
+          echo "Waiting for instance to start..."
+          sleep 60
+          
+          INSTANCE_IP=$(gcloud compute instances describe "$TEST_INSTANCE" \
+            --zone="${{ env.GCP_ZONE }}" \
+            --format="get(networkInterfaces[0].accessConfigs[0].natIP)")
+          
+          echo "Testing application at: http://$INSTANCE_IP:8080"
+          
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$INSTANCE_IP:8080/health" || echo "000")
+            
+            if [ "$HTTP_STATUS" -eq 200 ]; then
+              echo "✅ Image test successful!"
+              curl -s "http://$INSTANCE_IP:8080/health" | jq .
+              break
+            fi
+            
+            echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES: HTTP $HTTP_STATUS"
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            sleep 10
+          done
+          
+          echo "Cleaning up test instance..."
+          gcloud compute instances delete "$TEST_INSTANCE" \
+            --zone="${{ env.GCP_ZONE }}" \
+            --quiet
+
+      - name: Build Summary
+        if: always()
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.image_name }}
+        run: |
+          echo "=========================================="
+          echo "Packer Build Summary"
+          echo "=========================================="
+          echo "Image Name: $IMAGE_NAME"
+          echo "Image Family: webapp-image"
+          echo "Project: ${{ secrets.GCP_PROJECT_ID }}"
+          echo "Region: ${{ env.GCP_REGION }}"
+          echo ""
+          echo "Use this image for blue-green deployment:"
+          echo "  TF_VAR_custom_image=$IMAGE_NAME"
