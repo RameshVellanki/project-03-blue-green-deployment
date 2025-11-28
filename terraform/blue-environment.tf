@@ -58,6 +58,14 @@ resource "google_compute_instance_template" "blue" {
   metadata = {
     enable-oslogin = "FALSE"
     environment    = "blue"
+    app_version    = var.blue_image
+    startup-script = <<-EOF
+      #!/bin/bash
+      # Ensure webapp service is running
+      systemctl daemon-reload
+      systemctl enable webapp.service
+      systemctl restart webapp.service
+    EOF
   }
 
   lifecycle {
