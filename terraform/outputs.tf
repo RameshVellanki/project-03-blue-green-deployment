@@ -57,10 +57,15 @@ output "green_image" {
   value       = var.green_image
 }
 
-# Service Account
-output "service_account_email" {
-  description = "Email of the service account"
-  value       = google_service_account.webapp_sa.email
+# Service Accounts
+output "blue_service_account_email" {
+  description = "Email of the blue service account"
+  value       = google_service_account.blue_sa.email
+}
+
+output "green_service_account_email" {
+  description = "Email of the green service account"
+  value       = google_service_account.green_sa.email
 }
 
 # Health Check
