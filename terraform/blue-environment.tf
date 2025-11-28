@@ -1,5 +1,6 @@
 # Service Account for Blue Environment
 resource "google_service_account" "blue_sa" {
+  count        = var.deploy_blue ? 1 : 0
   account_id   = "webapp-blue-sa"
   display_name = "Service Account for Blue Environment"
   description  = "Custom service account for blue environment instances with minimal permissions"
@@ -7,20 +8,23 @@ resource "google_service_account" "blue_sa" {
 
 # IAM: Blue Logging
 resource "google_project_iam_member" "blue_logging" {
+  count   = var.deploy_blue ? 1 : 0
   project = var.project_id
   role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${google_service_account.blue_sa.email}"
+  member  = "serviceAccount:${google_service_account.blue_sa[0].email}"
 }
 
 # IAM: Blue Monitoring
 resource "google_project_iam_member" "blue_monitoring" {
+  count   = var.deploy_blue ? 1 : 0
   project = var.project_id
   role    = "roles/monitoring.metricWriter"
-  member  = "serviceAccount:${google_service_account.blue_sa.email}"
+  member  = "serviceAccount:${google_service_account.blue_sa[0].email}"
 }
 
 # Blue Environment Instance Template
 resource "google_compute_instance_template" "blue" {
+  count        = var.deploy_blue ? 1 : 0
   name_prefix  = "blue-template-"
   machine_type = var.machine_type
   region       = var.region
@@ -28,7 +32,6 @@ resource "google_compute_instance_template" "blue" {
   tags = ["http-server", "blue-server"]
   labels = merge(var.labels, {
     environment = "blue"
-    version     = replace(var.blue_version, ".", "-")
   })
 
   disk {
@@ -48,14 +51,13 @@ resource "google_compute_instance_template" "blue" {
   }
 
   service_account {
-    email  = google_service_account.blue_sa.email
+    email  = google_service_account.blue_sa[0].email
     scopes = ["cloud-platform"]
   }
 
   metadata = {
     enable-oslogin = "FALSE"
     environment    = "blue"
-    app_version    = var.blue_version
   }
 
   lifecycle {
@@ -65,13 +67,14 @@ resource "google_compute_instance_template" "blue" {
 
 # Blue Environment Managed Instance Group
 resource "google_compute_instance_group_manager" "blue" {
+  count              = var.deploy_blue ? 1 : 0
   name               = "blue-mig"
   base_instance_name = "blue-instance"
   zone               = var.zone
   target_size        = var.blue_instance_count
 
   version {
-    instance_template = google_compute_instance_template.blue.id
+    instance_template = google_compute_instance_template.blue[0].id
   }
 
   named_port {
@@ -100,15 +103,17 @@ resource "google_compute_instance_group_manager" "blue" {
     google_compute_instance_template.blue,
     google_service_account.blue_sa,
     google_project_iam_member.blue_logging,
-    google_project_iam_member.blue_monitoring
+    google_project_iam_member.blue_monitoring,
+    google_compute_health_check.http_health_check
   ]
 }
 
 # Blue Environment Autoscaler
 resource "google_compute_autoscaler" "blue" {
+  count  = var.deploy_blue ? 1 : 0
   name   = "blue-autoscaler"
   zone   = var.zone
-  target = google_compute_instance_group_manager.blue.id
+  target = google_compute_instance_group_manager.blue[0].id
 
   autoscaling_policy {
     max_replicas    = 5

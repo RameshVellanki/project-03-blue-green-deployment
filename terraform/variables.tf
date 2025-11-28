@@ -38,16 +38,16 @@ variable "active_environment" {
   }
 }
 
-variable "blue_version" {
-  description = "Application version for blue environment"
-  type        = string
-  default     = "1.0.0"
+variable "deploy_blue" {
+  description = "Whether to deploy blue environment"
+  type        = bool
+  default     = false
 }
 
-variable "green_version" {
-  description = "Application version for green environment"
-  type        = string
-  default     = "1.0.0"
+variable "deploy_green" {
+  description = "Whether to deploy green environment"
+  type        = bool
+  default     = false
 }
 
 variable "machine_type" {

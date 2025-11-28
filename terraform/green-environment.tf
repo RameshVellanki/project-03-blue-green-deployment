@@ -1,5 +1,6 @@
 # Service Account for Green Environment
 resource "google_service_account" "green_sa" {
+  count        = var.deploy_green ? 1 : 0
   account_id   = "webapp-green-sa"
   display_name = "Service Account for Green Environment"
   description  = "Custom service account for green environment instances with minimal permissions"
@@ -7,20 +8,23 @@ resource "google_service_account" "green_sa" {
 
 # IAM: Green Logging
 resource "google_project_iam_member" "green_logging" {
+  count   = var.deploy_green ? 1 : 0
   project = var.project_id
   role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${google_service_account.green_sa.email}"
+  member  = "serviceAccount:${google_service_account.green_sa[0].email}"
 }
 
 # IAM: Green Monitoring
 resource "google_project_iam_member" "green_monitoring" {
+  count   = var.deploy_green ? 1 : 0
   project = var.project_id
   role    = "roles/monitoring.metricWriter"
-  member  = "serviceAccount:${google_service_account.green_sa.email}"
+  member  = "serviceAccount:${google_service_account.green_sa[0].email}"
 }
 
 # Green Environment Instance Template
 resource "google_compute_instance_template" "green" {
+  count        = var.deploy_green ? 1 : 0
   name_prefix  = "green-template-"
   machine_type = var.machine_type
   region       = var.region
@@ -28,7 +32,6 @@ resource "google_compute_instance_template" "green" {
   tags = ["http-server", "green-server"]
   labels = merge(var.labels, {
     environment = "green"
-    version     = replace(var.green_version, ".", "-")
   })
 
   disk {
@@ -48,14 +51,13 @@ resource "google_compute_instance_template" "green" {
   }
 
   service_account {
-    email  = google_service_account.green_sa.email
+    email  = google_service_account.green_sa[0].email
     scopes = ["cloud-platform"]
   }
 
   metadata = {
     enable-oslogin = "FALSE"
     environment    = "green"
-    app_version    = var.green_version
   }
 
   lifecycle {
@@ -65,13 +67,14 @@ resource "google_compute_instance_template" "green" {
 
 # Green Environment Managed Instance Group
 resource "google_compute_instance_group_manager" "green" {
+  count              = var.deploy_green ? 1 : 0
   name               = "green-mig"
   base_instance_name = "green-instance"
   zone               = var.zone
   target_size        = var.green_instance_count
 
   version {
-    instance_template = google_compute_instance_template.green.id
+    instance_template = google_compute_instance_template.green[0].id
   }
 
   named_port {
@@ -100,15 +103,17 @@ resource "google_compute_instance_group_manager" "green" {
     google_compute_instance_template.green,
     google_service_account.green_sa,
     google_project_iam_member.green_logging,
-    google_project_iam_member.green_monitoring
+    google_project_iam_member.green_monitoring,
+    google_compute_health_check.http_health_check
   ]
 }
 
 # Green Environment Autoscaler
 resource "google_compute_autoscaler" "green" {
+  count  = var.deploy_green ? 1 : 0
   name   = "green-autoscaler"
   zone   = var.zone
-  target = google_compute_instance_group_manager.green.id
+  target = google_compute_instance_group_manager.green[0].id
 
   autoscaling_policy {
     max_replicas    = 5

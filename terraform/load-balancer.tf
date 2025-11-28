@@ -68,11 +68,23 @@ resource "google_compute_backend_service" "webapp" {
   health_checks         = [google_compute_health_check.http_health_check.id]
   load_balancing_scheme = "EXTERNAL"
 
-  # Backend points to active environment
-  backend {
-    group           = var.active_environment == "blue" ? google_compute_instance_group_manager.blue.instance_group : google_compute_instance_group_manager.green.instance_group
-    balancing_mode  = "UTILIZATION"
-    capacity_scaler = 1.0
+  # Backend points to active environment (only one will exist at a time during deployment)
+  dynamic "backend" {
+    for_each = var.active_environment == "blue" && var.deploy_blue ? [1] : []
+    content {
+      group           = google_compute_instance_group_manager.blue[0].instance_group
+      balancing_mode  = "UTILIZATION"
+      capacity_scaler = 1.0
+    }
+  }
+
+  dynamic "backend" {
+    for_each = var.active_environment == "green" && var.deploy_green ? [1] : []
+    content {
+      group           = google_compute_instance_group_manager.green[0].instance_group
+      balancing_mode  = "UTILIZATION"
+      capacity_scaler = 1.0
+    }
   }
 
   log_config {

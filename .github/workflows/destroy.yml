@@ -1,49 +1,38 @@
-name: Destroy Blue-Green Infrastructure
+name: Destroy
 
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: 'What to destroy'
-        required: true
-        type: choice
-        options:
-          - blue-only
-          - green-only
-          - all
       confirm:
-        description: 'Type "destroy" to confirm deletion'
+        description: 'Type "destroy" to confirm'
         required: true
         type: string
 
 env:
   TERRAFORM_VERSION: '1.6.0'
-  GCP_REGION: 'us-central1'
-  GCP_ZONE: 'us-central1-a'
 
 jobs:
   destroy:
-    name: Destroy Infrastructure
+    name: Destroy All
     runs-on: ubuntu-latest
     
     steps:
-      - name: Validate confirmation
+      - name: Validate
         run: |
           if [ "${{ github.event.inputs.confirm }}" != "destroy" ]; then
-            echo "❌ Confirmation failed. You must type 'destroy' to proceed."
+            echo "❌ Type 'destroy' to confirm"
             exit 1
           fi
-          echo "✅ Confirmation validated"
 
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
+      - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Set up Cloud SDK
+      - name: Setup Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
@@ -57,113 +46,20 @@ jobs:
         working-directory: ./terraform
         run: terraform init
 
-      - name: Get current state
-        working-directory: ./terraform
-        id: state
-        run: |
-          echo "Current infrastructure:"
-          terraform show -no-color || echo "No state found"
-          
-          ACTIVE_ENV=$(terraform output -raw active_environment 2>/dev/null || echo "none")
-          LB_IP=$(terraform output -raw lb_ip_address 2>/dev/null || echo "none")
-          
-          echo "active_environment=$ACTIVE_ENV" >> $GITHUB_OUTPUT
-          echo "lb_ip=$LB_IP" >> $GITHUB_OUTPUT
-
-      - name: Destroy Blue Environment
-        if: github.event.inputs.target == 'blue-only' || github.event.inputs.target == 'all'
+      - name: Destroy All
         working-directory: ./terraform
         env:
           TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-          TF_VAR_region: ${{ env.GCP_REGION }}
-          TF_VAR_zone: ${{ env.GCP_ZONE }}
         run: |
-          echo "Destroying blue environment..."
-          terraform destroy -auto-approve \
-            -target=google_compute_autoscaler.blue \
-            -target=google_compute_instance_group_manager.blue \
-            -target=google_compute_instance_template.blue
-
-      - name: Destroy Green Environment
-        if: github.event.inputs.target == 'green-only' || github.event.inputs.target == 'all'
-        working-directory: ./terraform
-        env:
-          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-          TF_VAR_region: ${{ env.GCP_REGION }}
-          TF_VAR_zone: ${{ env.GCP_ZONE }}
-        run: |
-          echo "Destroying green environment..."
-          terraform destroy -auto-approve \
-            -target=google_compute_autoscaler.green \
-            -target=google_compute_instance_group_manager.green \
-            -target=google_compute_instance_template.green
-
-      - name: Destroy Common Infrastructure
-        if: github.event.inputs.target == 'all'
-        working-directory: ./terraform
-        env:
-          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-          TF_VAR_region: ${{ env.GCP_REGION }}
-          TF_VAR_zone: ${{ env.GCP_ZONE }}
-        run: |
-          echo "Destroying load balancer and common infrastructure..."
+          echo "🗑️  Destroying all infrastructure..."
           terraform destroy -auto-approve
 
-      - name: Verify cleanup
-        env:
-          TARGET: ${{ github.event.inputs.target }}
+      - name: Summary
         run: |
-          echo "Verifying cleanup..."
-          
-          if [ "$TARGET" = "blue-only" ] || [ "$TARGET" = "all" ]; then
-            BLUE_INSTANCES=$(gcloud compute instances list \
-              --filter="name:blue-*" \
-              --format="value(name)" | wc -l)
-            
-            if [ "$BLUE_INSTANCES" -gt 0 ]; then
-              echo "⚠️  Warning: $BLUE_INSTANCES blue instances still exist"
-            else
-              echo "✅ Blue environment cleaned up"
-            fi
-          fi
-          
-          if [ "$TARGET" = "green-only" ] || [ "$TARGET" = "all" ]; then
-            GREEN_INSTANCES=$(gcloud compute instances list \
-              --filter="name:green-*" \
-              --format="value(name)" | wc -l)
-            
-            if [ "$GREEN_INSTANCES" -gt 0 ]; then
-              echo "⚠️  Warning: $GREEN_INSTANCES green instances still exist"
-            else
-              echo "✅ Green environment cleaned up"
-            fi
-          fi
-
-      - name: Cleanup Summary
-        if: always()
-        env:
-          TARGET: ${{ github.event.inputs.target }}
-          ACTIVE_ENV: ${{ steps.state.outputs.active_environment }}
-          LB_IP: ${{ steps.state.outputs.lb_ip }}
-        run: |
-          echo "=========================================="
-          echo "Destruction Summary"
-          echo "=========================================="
-          echo "Target: $TARGET"
-          echo "Previous Active Environment: $ACTIVE_ENV"
-          echo "Previous Load Balancer IP: $LB_IP"
+          echo "======================================"
+          echo "✅ All Infrastructure Destroyed"
+          echo "======================================"
           echo ""
-          
-          if [ "$TARGET" = "all" ]; then
-            echo "✅ All infrastructure destroyed"
-            echo ""
-            echo "To recreate:"
-            echo "  1. Build image: Run 'build-image' workflow"
-            echo "  2. Deploy blue: Run 'deploy-blue' workflow"
-            echo "  3. Switch traffic: Run 'switch-traffic' workflow"
-          else
-            echo "✅ $TARGET environment destroyed"
-            echo ""
-            echo "Remaining infrastructure still incurs costs"
-            echo "Run destroy workflow with 'all' to clean up completely"
-          fi
+          echo "To redeploy:"
+          echo "1. Run build-image workflow"
+          echo "2. Run deploy workflow"

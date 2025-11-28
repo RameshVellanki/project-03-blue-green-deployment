@@ -1,35 +1,27 @@
-name: Build Custom Image with Packer
+name: Build Image
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'packer/**'
-      - 'scripts/app/**'
-      - '.github/workflows/build-image.yml'
   workflow_dispatch:
 
 env:
   PACKER_VERSION: '1.10.0'
-  GCP_REGION: 'us-central1'
   GCP_ZONE: 'us-central1-a'
 
 jobs:
-  build-image:
-    name: Build Image
+  build:
+    name: Build with Packer
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
+      - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Set up Cloud SDK
+      - name: Setup Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
@@ -39,11 +31,6 @@ jobs:
         with:
           version: ${{ env.PACKER_VERSION }}
 
-      - name: Packer Format Check
-        working-directory: ./packer
-        run: packer fmt -check .
-        continue-on-error: true
-
       - name: Packer Init
         working-directory: ./packer
         run: packer init image.pkr.hcl
@@ -52,7 +39,6 @@ jobs:
         working-directory: ./packer
         env:
           PKR_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-          PKR_VAR_region: ${{ env.GCP_REGION }}
           PKR_VAR_zone: ${{ env.GCP_ZONE }}
         run: packer validate image.pkr.hcl
 
@@ -60,24 +46,28 @@ jobs:
         working-directory: ./packer
         env:
           PKR_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-          PKR_VAR_region: ${{ env.GCP_REGION }}
           PKR_VAR_zone: ${{ env.GCP_ZONE }}
           PKR_VAR_image_version: 1.0.0
-        run: |
-          echo "Building custom image with Packer..."
-          echo "Using version: 1.0.0 (commit: ${{ github.sha }})"
-          packer build -color=false image.pkr.hcl | tee packer-output.txt
-          
-          # Display full output for debugging
-          echo "=== Packer Output ==="
-          cat packer-output.txt
+        run: packer build image.pkr.hcl
 
-      - name: Extract Image Name
+      - name: Get Image Name
         id: image
         run: |
-          # Extract image name from packer-manifest.json
-          if [ -f "packer/packer-manifest.json" ]; then
-            IMAGE_NAME=$(jq -r '.builds[-1].artifact_id' packer/packer-manifest.json | cut -d: -f2)
+          IMAGE_NAME=$(jq -r '.builds[-1].artifact_id' packer/packer-manifest.json | cut -d: -f2)
+          echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
+          echo "✅ Built: $IMAGE_NAME"
+
+      - name: Summary
+        env:
+          IMAGE: ${{ steps.image.outputs.image_name }}
+        run: |
+          echo "======================================"
+          echo "✅ Image Built Successfully"
+          echo "======================================"
+          echo "Image: $IMAGE"
+          echo ""
+          echo "Next: Run deploy workflow"
+
             echo "Extracted image from manifest: $IMAGE_NAME"
           else
             # Fallback: try to get latest image from the webapp family

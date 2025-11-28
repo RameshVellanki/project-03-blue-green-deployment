@@ -1,0 +1,113 @@
+name: Rollback
+
+on:
+  workflow_dispatch:
+
+env:
+  TERRAFORM_VERSION: '1.6.0'
+  GCP_REGION: 'us-central1'
+  GCP_ZONE: 'us-central1-a'
+
+jobs:
+  rollback:
+    name: Rollback to Previous
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+
+      - name: Detect Rollback Target
+        id: detect
+        working-directory: ./terraform
+        run: |
+          CURRENT=$(terraform output -raw active_environment)
+          BLUE_IMG=$(terraform output -raw blue_image)
+          GREEN_IMG=$(terraform output -raw green_image)
+          
+          if [ "$CURRENT" == "blue" ]; then
+            TARGET="green"
+            echo "↩️  Rolling back from blue to green"
+          else
+            TARGET="blue"
+            echo "↩️  Rolling back from green to blue"
+          fi
+          
+          echo "current=$CURRENT" >> $GITHUB_OUTPUT
+          echo "target=$TARGET" >> $GITHUB_OUTPUT
+          echo "blue_image=$BLUE_IMG" >> $GITHUB_OUTPUT
+          echo "green_image=$GREEN_IMG" >> $GITHUB_OUTPUT
+
+      - name: Execute Rollback
+        working-directory: ./terraform
+        env:
+          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_region: ${{ env.GCP_REGION }}
+          TF_VAR_zone: ${{ env.GCP_ZONE }}
+        run: |
+          TARGET="${{ steps.detect.outputs.target }}"
+          BLUE_IMG="${{ steps.detect.outputs.blue_image }}"
+          GREEN_IMG="${{ steps.detect.outputs.green_image }}"
+          
+          echo "🔄 Switching to $TARGET..."
+          
+          if [ "$TARGET" == "blue" ]; then
+            terraform apply -auto-approve \
+              -var="blue_image=$BLUE_IMG" \
+              -var="green_image=$GREEN_IMG" \
+              -var="deploy_blue=true" \
+              -var="deploy_green=true" \
+              -var="active_environment=blue" \
+              -var="blue_instance_count=2" \
+              -var="green_instance_count=0"
+          else
+            terraform apply -auto-approve \
+              -var="blue_image=$BLUE_IMG" \
+              -var="green_image=$GREEN_IMG" \
+              -var="deploy_blue=true" \
+              -var="deploy_green=true" \
+              -var="active_environment=green" \
+              -var="blue_instance_count=0" \
+              -var="green_instance_count=2"
+          fi
+
+      - name: Get Info
+        id: info
+        working-directory: ./terraform
+        run: |
+          LB_IP=$(terraform output -raw lb_ip_address)
+          echo "lb_ip=$LB_IP" >> $GITHUB_OUTPUT
+
+      - name: Summary
+        env:
+          TARGET: ${{ steps.detect.outputs.target }}
+          LB_IP: ${{ steps.info.outputs.lb_ip }}
+        run: |
+          echo "======================================"
+          echo "✅ Rollback Complete"
+          echo "======================================"
+          echo "Active: $TARGET"
+          echo "URL: http://$LB_IP"
+          echo ""
+          echo "Test: curl http://$LB_IP/api/health"
+

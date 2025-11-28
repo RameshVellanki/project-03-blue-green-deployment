@@ -18,17 +18,12 @@ output "active_environment" {
 # Blue Environment Outputs
 output "blue_mig_name" {
   description = "Name of the blue managed instance group"
-  value       = google_compute_instance_group_manager.blue.name
+  value       = var.deploy_blue ? google_compute_instance_group_manager.blue[0].name : null
 }
 
 output "blue_instance_count" {
   description = "Number of instances in blue MIG"
   value       = var.blue_instance_count
-}
-
-output "blue_version" {
-  description = "Application version for blue environment"
-  value       = var.blue_version
 }
 
 output "blue_image" {
@@ -39,17 +34,12 @@ output "blue_image" {
 # Green Environment Outputs
 output "green_mig_name" {
   description = "Name of the green managed instance group"
-  value       = google_compute_instance_group_manager.green.name
+  value       = var.deploy_green ? google_compute_instance_group_manager.green[0].name : null
 }
 
 output "green_instance_count" {
   description = "Number of instances in green MIG"
   value       = var.green_instance_count
-}
-
-output "green_version" {
-  description = "Application version for green environment"
-  value       = var.green_version
 }
 
 output "green_image" {
@@ -60,12 +50,12 @@ output "green_image" {
 # Service Accounts
 output "blue_service_account_email" {
   description = "Email of the blue service account"
-  value       = google_service_account.blue_sa.email
+  value       = var.deploy_blue ? google_service_account.blue_sa[0].email : null
 }
 
 output "green_service_account_email" {
   description = "Email of the green service account"
-  value       = google_service_account.green_sa.email
+  value       = var.deploy_green ? google_service_account.green_sa[0].email : null
 }
 
 # Health Check

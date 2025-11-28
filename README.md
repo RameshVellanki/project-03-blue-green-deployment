@@ -69,77 +69,55 @@ Custom Image Built with Packer:
 
 ## 🚀 Quick Start
 
-### 1. Clone Repository
-```bash
-git clone <your-repo-url>
-cd project-03-blue-green-deployment
+### 1. Configure GitHub Secrets
+```
+GCP_PROJECT_ID: your-gcp-project-id
+GCP_SA_KEY: your-service-account-json-key
 ```
 
-### 2. Build Custom Image with Packer
+### 2. Build First Image
+Run **build-image** workflow in GitHub Actions
+- Builds custom image with Packer
+- Bakes in Node.js app and dependencies
+- Creates image in 'webapp' family
+
+### 3. Initial Deployment
+Run **deploy** workflow (first time)
+- Automatically deploys to **blue**
+- Creates load balancer
+- Blue serves 100% traffic 🔵
+
+### 4. Test Application
 ```bash
-cd packer
-
-# Initialize Packer
-packer init .
-
-# Validate Packer template
-packer validate -var "project_id=your-project-id" .
-
-# Build image
-packer build -var "project_id=your-project-id" .
-```
-
-### 3. Deploy Blue Environment
-```bash
-cd terraform
-
-# Configure variables
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your values
-
-# Deploy blue environment
-terraform init
-terraform plan -var="active_environment=blue"
-terraform apply -var="active_environment=blue"
-```
-
-### 4. Test Blue Environment
-```bash
-# Get load balancer IP
-terraform output lb_ip_address
-
-# Test application
+# Get load balancer IP from workflow output
 curl http://<LB_IP>/api/health
 curl http://<LB_IP>/api/version
 ```
 
-### 5. Deploy Green Environment
+### 5. Deploy New Version
 ```bash
-# Build new image with updated application
-cd packer
-packer build -var "project_id=your-project-id" -var "version=2.0.0" .
-
-# Deploy green environment (traffic still on blue)
-cd terraform
-terraform apply -var="active_environment=blue" -var="green_image=<new-image-name>"
+# Update application code (e.g., scripts/app/server.js)
+# Commit and push changes
 ```
 
-### 6. Switch Traffic to Green
-```bash
-# Verify green is healthy
-curl http://<GREEN_INTERNAL_IP>/api/health
+Run **build-image** workflow (new version)
+Run **deploy** workflow (second time)
+- Automatically deploys to **green**
+- Waits for health checks
+- **Auto-switches traffic to green** 🟢
+- Scales blue down to 0
 
-# Switch traffic
-terraform apply -var="active_environment=green"
-
-# Traffic is now on green! 🟢
-```
+### 6. Next Deployment
+Run **deploy** workflow (third time)
+- Automatically deploys to **blue**
+- **Auto-switches traffic to blue** 🔵
+- Scales green down to 0
+- Continuous toggle between environments!
 
 ### 7. Rollback if Needed
-```bash
-# Instant rollback to blue
-terraform apply -var="active_environment=blue"
-```
+Run **rollback** workflow
+- Instant switch back to previous environment
+- Automatic scaling and traffic management
 
 ## 📁 Project Structure
 
@@ -148,9 +126,8 @@ project-03-blue-green-deployment/
 ├── .github/
 │   └── workflows/
 │       ├── build-image.yml       # Build custom image with Packer
-│       ├── deploy-blue.yml       # Deploy blue environment
-│       ├── deploy-green.yml      # Deploy green environment
-│       ├── switch-traffic.yml    # Switch traffic between environments
+│       ├── deploy.yml            # Auto blue-green toggle deployment
+│       ├── rollback.yml          # Rollback to previous environment
 │       └── destroy.yml           # Destroy infrastructure
 ├── packer/
 │   ├── image.pkr.hcl             # Packer template (HCL2)
@@ -175,43 +152,50 @@ project-03-blue-green-deployment/
 └── .gitignore
 ```
 
-## 🔄 Blue-Green Deployment Workflow
+## 🔄 Automated Blue-Green Toggle Workflow
 
-### Phase 1: Initial Deployment (Blue)
-1. Build custom image with Packer (v1.0.0)
-2. Deploy blue environment with MIG
-3. Configure load balancer pointing to blue
-4. Verify application is healthy
-5. **Blue is serving 100% traffic** 🔵
+### Deployment 1: Initial (Blue)
+1. Run **deploy** workflow
+2. Detects: No existing deployment
+3. Deploys to **blue** with load balancer
+4. **Blue is serving 100% traffic** 🔵
+5. Green: Not deployed
 
-### Phase 2: Deploy Green (New Version)
-1. Build new image with Packer (v2.0.0)
-2. Deploy green environment with new image
-3. Green instances start up (not receiving traffic)
-4. Verify green instances are healthy
-5. **Blue still serving 100% traffic** 🔵
+### Deployment 2: New Version (Green)
+1. Build new image (v2.0.0)
+2. Run **deploy** workflow
+3. Detects: Blue is active
+4. Deploys to **green** (blue still serving traffic)
+5. Waits for green health checks
+6. **Auto-switches traffic to green** 🟢
+7. **Auto-scales blue to 0 instances**
+8. Blue: Standby (ready for rollback)
 
-### Phase 3: Switch Traffic
-1. Update load balancer backend to point to green
-2. Health checks ensure green is ready
-3. Traffic gradually switches to green
-4. Monitor metrics and logs
-5. **Green now serving 100% traffic** 🟢
-6. Blue instances remain running (ready for rollback)
+### Deployment 3: Newer Version (Blue)
+1. Build new image (v3.0.0)
+2. Run **deploy** workflow
+3. Detects: Green is active
+4. Deploys to **blue** (green still serving traffic)
+5. Waits for blue health checks
+6. **Auto-switches traffic to blue** 🔵
+7. **Auto-scales green to 0 instances**
+8. Green: Standby (ready for rollback)
 
-### Phase 4: Verify and Cleanup
-1. Monitor green environment for issues
-2. If issues found: instant rollback to blue
-3. If stable: keep green active
-4. Optionally scale down or destroy blue
-5. **Green continues serving traffic** 🟢
+### Rollback Anytime
+1. Run **rollback** workflow
+2. Detects current active environment
+3. Scales up previous environment
+4. Switches traffic automatically
+5. Scales down current environment
+6. **Instant rollback complete!** ↩️
 
-### Phase 5: Next Deployment
-1. Blue becomes the new deployment target
-2. Build new image (v3.0.0)
-3. Deploy to blue environment
-4. Switch traffic from green to blue
-5. **Continuous zero-downtime deployments** 🔄
+**Key Features:**
+- ✅ Fully automated - no manual traffic switching
+- ✅ Automatic environment detection
+- ✅ Automatic scaling (2 instances active, 0 standby)
+- ✅ Health check validation before switching
+- ✅ One-click rollback
+- ✅ Zero downtime deployments
 
 ## 🎨 Deployment Strategies Supported
 
