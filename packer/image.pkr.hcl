@@ -136,8 +136,8 @@ build {
   
   # Upload application files
   provisioner "file" {
-    source      = "../scripts/app/"
-    destination = "/tmp/app"
+    source      = "../scripts/app"
+    destination = "/tmp"
   }
   
   # Upload provisioning script
