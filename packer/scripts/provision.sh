@@ -85,8 +85,8 @@ log "Creating systemd service..."
 cat > /etc/systemd/system/webapp.service <<'EOF'
 [Unit]
 Description=Web Application for Blue-Green Deployment
-After=network.target webapp-configure.service
-Wants=webapp-configure.service
+After=network-online.target
+Wants=network-online.target
 Documentation=https://github.com/your-org/blue-green-deployment
 
 [Service]
@@ -96,7 +96,7 @@ WorkingDirectory=/opt/webapp
 Environment="NODE_ENV=production"
 Environment="PORT=8080"
 EnvironmentFile=-/opt/webapp/.env
-ExecStartPre=/bin/sh -c 'echo "Starting webapp service..."'
+ExecStartPre=/usr/local/bin/webapp-configure.sh
 ExecStart=/usr/bin/node /opt/webapp/server.js
 Restart=always
 RestartSec=10
@@ -121,11 +121,14 @@ systemctl enable webapp.service
 log "Creating first-boot configuration script..."
 cat > /usr/local/bin/webapp-configure.sh <<'FIRSTBOOT_EOF'
 #!/bin/bash
-# This script runs on first boot to configure environment-specific settings
+# This script runs before webapp service starts to configure environment-specific settings
 
 # Get instance metadata
-ENVIRONMENT=$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/attributes/environment -H "Metadata-Flavor: Google" || echo "unknown")
-APP_VERSION=$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/attributes/app_version -H "Metadata-Flavor: Google" || echo "1.0.0")
+ENVIRONMENT=$(curl -sf http://metadata.google.internal/computeMetadata/v1/instance/attributes/environment -H "Metadata-Flavor: Google" || echo "unknown")
+APP_VERSION=$(curl -sf http://metadata.google.internal/computeMetadata/v1/instance/attributes/app_version -H "Metadata-Flavor: Google" || echo "1.0.0")
+INSTANCE_NAME=$(curl -sf http://metadata.google.internal/computeMetadata/v1/instance/name -H "Metadata-Flavor: Google" || echo "unknown")
+INSTANCE_ID=$(curl -sf http://metadata.google.internal/computeMetadata/v1/instance/id -H "Metadata-Flavor: Google" || echo "unknown")
+ZONE=$(curl -sf http://metadata.google.internal/computeMetadata/v1/instance/zone -H "Metadata-Flavor: Google" | cut -d/ -f4 || echo "unknown")
 
 # Create environment file
 cat > /opt/webapp/.env <<EOF
@@ -133,37 +136,16 @@ NODE_ENV=production
 PORT=8080
 APP_VERSION=${APP_VERSION}
 ENVIRONMENT=${ENVIRONMENT}
-INSTANCE_NAME=$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/name -H "Metadata-Flavor: Google")
-INSTANCE_ID=$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/id -H "Metadata-Flavor: Google")
-ZONE=$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone -H "Metadata-Flavor: Google" | cut -d/ -f4)
+INSTANCE_NAME=${INSTANCE_NAME}
+INSTANCE_ID=${INSTANCE_ID}
+ZONE=${ZONE}
 EOF
 
-# Restart service to pick up new environment
-systemctl restart webapp.service
-
 echo "Webapp configured for environment: ${ENVIRONMENT}, version: ${APP_VERSION}"
+exit 0
 FIRSTBOOT_EOF
 
 chmod +x /usr/local/bin/webapp-configure.sh
-
-# Create systemd oneshot service for first boot configuration
-cat > /etc/systemd/system/webapp-configure.service <<'EOF'
-[Unit]
-Description=Configure Web Application on First Boot
-After=network-online.target
-Wants=network-online.target
-Before=webapp.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/webapp-configure.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl enable webapp-configure.service
 
 # Create health check script
 log "Creating health check script..."
