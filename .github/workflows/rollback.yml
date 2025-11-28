@@ -40,21 +40,25 @@ jobs:
         id: detect
         working-directory: ./terraform
         run: |
-          CURRENT=$(terraform output -raw active_environment)
-          BLUE_IMG=$(terraform output -raw blue_image)
-          GREEN_IMG=$(terraform output -raw green_image)
+          CURRENT=$(terraform output -raw active_environment 2>&1 | grep -v "Warning" | grep -v "│" | head -n1)
+          BLUE_IMG=$(terraform output -raw blue_image 2>&1 | grep -v "Warning" | grep -v "│" | head -n1)
+          GREEN_IMG=$(terraform output -raw green_image 2>&1 | grep -v "Warning" | grep -v "│" | head -n1)
           
-          if [ "$CURRENT" == "blue" ]; then
+          if [ -z "$CURRENT" ] || [ "$CURRENT" == "none" ]; then
+            echo "❌ No active deployment to rollback from"
+            exit 1
+          elif [ "$CURRENT" == "blue" ]; then
             TARGET="green"
+            echo "🔵→🟢 Rolling back blue to green"
           else
             TARGET="blue"
+            echo "🟢→🔵 Rolling back green to blue"
           fi
           
           echo "current=$CURRENT" >> $GITHUB_OUTPUT
           echo "target=$TARGET" >> $GITHUB_OUTPUT
           echo "blue_img=$BLUE_IMG" >> $GITHUB_OUTPUT
           echo "green_img=$GREEN_IMG" >> $GITHUB_OUTPUT
-          echo "↩️  Rollback: $CURRENT → $TARGET"
 
       - name: Execute
         working-directory: ./terraform

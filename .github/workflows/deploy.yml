@@ -57,23 +57,25 @@ jobs:
         id: detect
         working-directory: ./terraform
         run: |
-          CURRENT=$(terraform output -raw active_environment 2>/dev/null || echo "none")
+          CURRENT=$(terraform output -raw active_environment 2>&1 | grep -v "Warning" | grep -v "│" | head -n1)
           
-          if [ "$CURRENT" == "none" ]; then
+          if [ -z "$CURRENT" ] || [ "$CURRENT" == "none" ]; then
             TARGET="blue"
             FIRST="true"
+            echo "🆕 First deployment"
           elif [ "$CURRENT" == "blue" ]; then
             TARGET="green"
             FIRST="false"
+            echo "🔵 Blue active → Deploy to green"
           else
             TARGET="blue"
             FIRST="false"
+            echo "🟢 Green active → Deploy to blue"
           fi
           
           echo "target=$TARGET" >> $GITHUB_OUTPUT
           echo "current=$CURRENT" >> $GITHUB_OUTPUT
           echo "first=$FIRST" >> $GITHUB_OUTPUT
-          echo "🎯 Target: $TARGET"
 
       - name: Deploy
         working-directory: ./terraform
