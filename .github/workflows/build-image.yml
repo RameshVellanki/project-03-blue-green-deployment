@@ -62,9 +62,10 @@ jobs:
           PKR_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
           PKR_VAR_region: ${{ env.GCP_REGION }}
           PKR_VAR_zone: ${{ env.GCP_ZONE }}
-          PKR_VAR_image_version: ${{ github.sha }}
+          PKR_VAR_image_version: 1.0.0
         run: |
           echo "Building custom image with Packer..."
+          echo "Using version: 1.0.0 (commit: ${{ github.sha }})"
           packer build -color=false image.pkr.hcl | tee packer-output.txt
           
           # Display full output for debugging

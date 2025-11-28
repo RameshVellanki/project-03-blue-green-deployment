@@ -78,7 +78,10 @@ variable "tags" {
 # Locals
 locals {
   timestamp = formatdate("YYYYMMDDHHmmss", timestamp())
-  image_name_full = "${var.image_name}-v${replace(var.image_version, ".", "-")}-${local.timestamp}"
+  # Truncate version to first 8 characters (short SHA) and sanitize
+  short_version = substr(replace(var.image_version, ".", "-"), 0, 8)
+  # Keep image name under 63 chars: webapp-<short-version>-<timestamp>
+  image_name_full = "${var.image_name}-${local.short_version}-${local.timestamp}"
   
   labels = {
     environment = "packer-build"
