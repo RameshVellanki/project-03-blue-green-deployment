@@ -57,9 +57,10 @@ jobs:
         id: detect
         working-directory: ./terraform
         run: |
-          CURRENT=$(terraform output -raw active_environment 2>&1 | grep -v "Warning" | grep -v "│" | head -n1)
+          # Get current active environment, filter out all Terraform warnings/formatting
+          CURRENT=$(terraform output -raw active_environment 2>&1 | grep -E "^(blue|green)$" || echo "")
           
-          if [ -z "$CURRENT" ] || [ "$CURRENT" == "none" ]; then
+          if [ -z "$CURRENT" ]; then
             TARGET="blue"
             FIRST="true"
             echo "🆕 First deployment"
@@ -98,7 +99,7 @@ jobs:
               -var="green_instance_count=0"
           else
             if [ "$TARGET" == "blue" ]; then
-              GREEN_IMG=$(terraform output -raw green_image)
+              GREEN_IMG=$(terraform output -raw green_image 2>&1 | grep -v "Warning" | grep -v "│" | head -n1)
               terraform apply -auto-approve \
                 -var="blue_image=$IMAGE" \
                 -var="green_image=$GREEN_IMG" \
@@ -108,7 +109,7 @@ jobs:
                 -var="blue_instance_count=2" \
                 -var="green_instance_count=2"
             else
-              BLUE_IMG=$(terraform output -raw blue_image)
+              BLUE_IMG=$(terraform output -raw blue_image 2>&1 | grep -v "Warning" | grep -v "│" | head -n1)
               terraform apply -auto-approve \
                 -var="blue_image=$BLUE_IMG" \
                 -var="green_image=$IMAGE" \
@@ -135,7 +136,7 @@ jobs:
           IMAGE="${{ steps.image.outputs.image }}"
           
           if [ "$TARGET" == "blue" ]; then
-            GREEN_IMG=$(terraform output -raw green_image)
+            GREEN_IMG=$(terraform output -raw green_image 2>&1 | grep -v "Warning" | grep -v "│" | head -n1)
             terraform apply -auto-approve \
               -var="blue_image=$IMAGE" \
               -var="green_image=$GREEN_IMG" \
@@ -145,7 +146,7 @@ jobs:
               -var="blue_instance_count=2" \
               -var="green_instance_count=0"
           else
-            BLUE_IMG=$(terraform output -raw blue_image)
+            BLUE_IMG=$(terraform output -raw blue_image 2>&1 | grep -v "Warning" | grep -v "│" | head -n1)
             terraform apply -auto-approve \
               -var="blue_image=$BLUE_IMG" \
               -var="green_image=$IMAGE" \
