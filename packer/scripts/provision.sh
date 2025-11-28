@@ -72,12 +72,21 @@ APP_VERSION=${APP_VERSION}
 ENVIRONMENT=${ENVIRONMENT}
 EOF
 
+# Create default .env file so service can start immediately
+cat > /opt/webapp/.env <<'EOF'
+NODE_ENV=production
+PORT=8080
+APP_VERSION=1.0.0
+ENVIRONMENT=unknown
+EOF
+
 # Create systemd service
 log "Creating systemd service..."
 cat > /etc/systemd/system/webapp.service <<'EOF'
 [Unit]
 Description=Web Application for Blue-Green Deployment
-After=network.target
+After=network.target webapp-configure.service
+Wants=webapp-configure.service
 Documentation=https://github.com/your-org/blue-green-deployment
 
 [Service]
