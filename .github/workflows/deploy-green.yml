@@ -74,11 +74,15 @@ jobs:
           TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
           TF_VAR_region: ${{ env.GCP_REGION }}
           TF_VAR_zone: ${{ env.GCP_ZONE }}
-          TF_VAR_custom_image: ${{ steps.image.outputs.image_name }}
-          TF_VAR_active_environment: "green"
+          TF_VAR_green_image: ${{ steps.image.outputs.image_name }}
+          TF_VAR_active_environment: ${{ github.event.inputs.traffic_switch || 'blue' }}
         run: |
           echo "Deploying green environment..."
           terraform apply -auto-approve \
+            -target=google_service_account.green_sa \
+            -target=google_project_iam_member.green_logging \
+            -target=google_project_iam_member.green_monitoring \
+            -target=google_compute_health_check.http_health_check \
             -target=google_compute_instance_template.green \
             -target=google_compute_instance_group_manager.green \
             -target=google_compute_autoscaler.green
