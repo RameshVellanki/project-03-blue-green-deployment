@@ -47,7 +47,7 @@ jobs:
             echo "Using provided image: $IMAGE_NAME"
           else
             IMAGE_NAME=$(gcloud compute images list \
-              --filter="family:webapp-image" \
+              --filter="family:webapp" \
               --format="value(name)" \
               --sort-by="~creationTimestamp" \
               --limit=1)
