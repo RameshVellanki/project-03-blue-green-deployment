@@ -21,6 +21,7 @@ output-*/
 
 # GCP Credentials
 *.json
+!scripts/app/package.json
 credentials/
 service-account-key.json
 

@@ -1,0 +1,17 @@
+{
+  "name": "blue-green-webapp",
+  "version": "1.0.0",
+  "description": "Blue-Green deployment web application for GCP learning",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "",
+  "license": "MIT"
+}
