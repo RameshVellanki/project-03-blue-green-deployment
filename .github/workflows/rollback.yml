@@ -5,12 +5,11 @@ on:
 
 env:
   TERRAFORM_VERSION: '1.6.0'
-  GCP_REGION: 'us-central1'
   GCP_ZONE: 'us-central1-a'
 
 jobs:
   rollback:
-    name: Rollback to Previous
+    name: Rollback
     runs-on: ubuntu-latest
     
     steps:
@@ -33,11 +32,11 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
-      - name: Terraform Init
+      - name: Init
         working-directory: ./terraform
         run: terraform init
 
-      - name: Detect Rollback Target
+      - name: Detect
         id: detect
         working-directory: ./terraform
         run: |
@@ -47,29 +46,25 @@ jobs:
           
           if [ "$CURRENT" == "blue" ]; then
             TARGET="green"
-            echo "↩️  Rolling back from blue to green"
           else
             TARGET="blue"
-            echo "↩️  Rolling back from green to blue"
           fi
           
           echo "current=$CURRENT" >> $GITHUB_OUTPUT
           echo "target=$TARGET" >> $GITHUB_OUTPUT
-          echo "blue_image=$BLUE_IMG" >> $GITHUB_OUTPUT
-          echo "green_image=$GREEN_IMG" >> $GITHUB_OUTPUT
+          echo "blue_img=$BLUE_IMG" >> $GITHUB_OUTPUT
+          echo "green_img=$GREEN_IMG" >> $GITHUB_OUTPUT
+          echo "↩️  Rollback: $CURRENT → $TARGET"
 
-      - name: Execute Rollback
+      - name: Execute
         working-directory: ./terraform
         env:
           TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-          TF_VAR_region: ${{ env.GCP_REGION }}
           TF_VAR_zone: ${{ env.GCP_ZONE }}
         run: |
           TARGET="${{ steps.detect.outputs.target }}"
-          BLUE_IMG="${{ steps.detect.outputs.blue_image }}"
-          GREEN_IMG="${{ steps.detect.outputs.green_image }}"
-          
-          echo "🔄 Switching to $TARGET..."
+          BLUE_IMG="${{ steps.detect.outputs.blue_img }}"
+          GREEN_IMG="${{ steps.detect.outputs.green_img }}"
           
           if [ "$TARGET" == "blue" ]; then
             terraform apply -auto-approve \
@@ -95,19 +90,16 @@ jobs:
         id: info
         working-directory: ./terraform
         run: |
-          LB_IP=$(terraform output -raw lb_ip_address)
-          echo "lb_ip=$LB_IP" >> $GITHUB_OUTPUT
+          LB=$(terraform output -raw lb_ip_address)
+          echo "lb=$LB" >> $GITHUB_OUTPUT
 
       - name: Summary
         env:
           TARGET: ${{ steps.detect.outputs.target }}
-          LB_IP: ${{ steps.info.outputs.lb_ip }}
+          LB: ${{ steps.info.outputs.lb }}
         run: |
           echo "======================================"
-          echo "✅ Rollback Complete"
+          echo "✅ Rolled Back"
           echo "======================================"
           echo "Active: $TARGET"
-          echo "URL: http://$LB_IP"
-          echo ""
-          echo "Test: curl http://$LB_IP/api/health"
-
+          echo "URL: http://$LB"

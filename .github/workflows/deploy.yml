@@ -1,16 +1,15 @@
-name: Deploy (Auto Blue-Green)
+name: Deploy
 
 on:
   workflow_dispatch:
 
 env:
   TERRAFORM_VERSION: '1.6.0'
-  GCP_REGION: 'us-central1'
   GCP_ZONE: 'us-central1-a'
 
 jobs:
   deploy:
-    name: Deploy New Version
+    name: Deploy
     runs-on: ubuntu-latest
     
     steps:
@@ -36,62 +35,58 @@ jobs:
       - name: Get Latest Image
         id: image
         run: |
-          IMAGE_NAME=$(gcloud compute images list \
+          IMAGE=$(gcloud compute images list \
             --filter="family:webapp" \
             --format="value(name)" \
             --sort-by="~creationTimestamp" \
             --limit=1)
           
-          if [ -z "$IMAGE_NAME" ]; then
-            echo "❌ No image found. Run build-image workflow first."
+          if [ -z "$IMAGE" ]; then
+            echo "❌ No image found"
             exit 1
           fi
           
-          echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
-          echo "🖼️  Image: $IMAGE_NAME"
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+          echo "🖼️  Image: $IMAGE"
 
-      - name: Terraform Init
+      - name: Init
         working-directory: ./terraform
         run: terraform init
 
-      - name: Detect Target Environment
+      - name: Detect Target
         id: detect
         working-directory: ./terraform
         run: |
           CURRENT=$(terraform output -raw active_environment 2>/dev/null || echo "none")
           
-          if [ "$CURRENT" == "none" ] || [ -z "$CURRENT" ]; then
+          if [ "$CURRENT" == "none" ]; then
             TARGET="blue"
             FIRST="true"
-            echo "🆕 First deployment → blue"
           elif [ "$CURRENT" == "blue" ]; then
             TARGET="green"
             FIRST="false"
-            echo "🔵 Blue active → Deploy to green"
           else
             TARGET="blue"
             FIRST="false"
-            echo "🟢 Green active → Deploy to blue"
           fi
           
           echo "target=$TARGET" >> $GITHUB_OUTPUT
           echo "current=$CURRENT" >> $GITHUB_OUTPUT
           echo "first=$FIRST" >> $GITHUB_OUTPUT
+          echo "🎯 Target: $TARGET"
 
-      - name: Deploy to Target
+      - name: Deploy
         working-directory: ./terraform
         env:
           TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-          TF_VAR_region: ${{ env.GCP_REGION }}
           TF_VAR_zone: ${{ env.GCP_ZONE }}
         run: |
           TARGET="${{ steps.detect.outputs.target }}"
           CURRENT="${{ steps.detect.outputs.current }}"
-          IMAGE="${{ steps.image.outputs.image_name }}"
+          IMAGE="${{ steps.image.outputs.image }}"
           FIRST="${{ steps.detect.outputs.first }}"
           
           if [ "$FIRST" == "true" ]; then
-            echo "🚀 Initial deployment to blue..."
             terraform apply -auto-approve \
               -var="blue_image=$IMAGE" \
               -var="deploy_blue=true" \
@@ -100,19 +95,20 @@ jobs:
               -var="blue_instance_count=2" \
               -var="green_instance_count=0"
           else
-            echo "🚀 Deploying to $TARGET, scaling both to 2 instances..."
             if [ "$TARGET" == "blue" ]; then
+              GREEN_IMG=$(terraform output -raw green_image)
               terraform apply -auto-approve \
                 -var="blue_image=$IMAGE" \
-                -var="green_image=$(terraform output -raw green_image)" \
+                -var="green_image=$GREEN_IMG" \
                 -var="deploy_blue=true" \
                 -var="deploy_green=true" \
                 -var="active_environment=$CURRENT" \
                 -var="blue_instance_count=2" \
                 -var="green_instance_count=2"
             else
+              BLUE_IMG=$(terraform output -raw blue_image)
               terraform apply -auto-approve \
-                -var="blue_image=$(terraform output -raw blue_image)" \
+                -var="blue_image=$BLUE_IMG" \
                 -var="green_image=$IMAGE" \
                 -var="deploy_blue=true" \
                 -var="deploy_green=true" \
@@ -122,7 +118,8 @@ jobs:
             fi
           fi
 
-      - name: Wait for Instances
+      - name: Wait
+        if: steps.detect.outputs.first == 'false'
         run: sleep 90
 
       - name: Switch Traffic
@@ -130,26 +127,25 @@ jobs:
         working-directory: ./terraform
         env:
           TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-          TF_VAR_region: ${{ env.GCP_REGION }}
           TF_VAR_zone: ${{ env.GCP_ZONE }}
         run: |
           TARGET="${{ steps.detect.outputs.target }}"
-          IMAGE="${{ steps.image.outputs.image_name }}"
-          
-          echo "🔄 Switching traffic to $TARGET..."
+          IMAGE="${{ steps.image.outputs.image }}"
           
           if [ "$TARGET" == "blue" ]; then
+            GREEN_IMG=$(terraform output -raw green_image)
             terraform apply -auto-approve \
               -var="blue_image=$IMAGE" \
-              -var="green_image=$(terraform output -raw green_image)" \
+              -var="green_image=$GREEN_IMG" \
               -var="deploy_blue=true" \
               -var="deploy_green=true" \
               -var="active_environment=blue" \
               -var="blue_instance_count=2" \
               -var="green_instance_count=0"
           else
+            BLUE_IMG=$(terraform output -raw blue_image)
             terraform apply -auto-approve \
-              -var="blue_image=$(terraform output -raw blue_image)" \
+              -var="blue_image=$BLUE_IMG" \
               -var="green_image=$IMAGE" \
               -var="deploy_blue=true" \
               -var="deploy_green=true" \
@@ -157,302 +153,25 @@ jobs:
               -var="blue_instance_count=0" \
               -var="green_instance_count=2"
           fi
-          
-          echo "✅ Traffic on $TARGET, old environment scaled to 0"
 
       - name: Get Info
         id: info
         working-directory: ./terraform
         run: |
-          LB_IP=$(terraform output -raw lb_ip_address)
+          LB=$(terraform output -raw lb_ip_address)
           ACTIVE=$(terraform output -raw active_environment)
-          echo "lb_ip=$LB_IP" >> $GITHUB_OUTPUT
+          echo "lb=$LB" >> $GITHUB_OUTPUT
           echo "active=$ACTIVE" >> $GITHUB_OUTPUT
 
       - name: Summary
         env:
-          IMAGE: ${{ steps.image.outputs.image_name }}
-          LB_IP: ${{ steps.info.outputs.lb_ip }}
+          IMAGE: ${{ steps.image.outputs.image }}
+          LB: ${{ steps.info.outputs.lb }}
           ACTIVE: ${{ steps.info.outputs.active }}
         run: |
           echo "======================================"
-          echo "✅ Deployment Complete"
+          echo "✅ Deployed"
           echo "======================================"
           echo "Image: $IMAGE"
           echo "Active: $ACTIVE"
-          echo "URL: http://$LB_IP"
-          echo ""
-          echo "Test: curl http://$LB_IP/api/health"
-
-          echo "  Deploy To: $TARGET_ENV"
-          echo "  Old Environment: $OLD_ENV"
-
-      - name: Deploy to Target Environment
-        working-directory: ./terraform
-        env:
-          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-          TF_VAR_region: ${{ env.GCP_REGION }}
-          TF_VAR_zone: ${{ env.GCP_ZONE }}
-        run: |
-          TARGET="${{ steps.detect.outputs.target_env }}"
-          OLD="${{ steps.detect.outputs.old_env }}"
-          IMAGE="${{ steps.image.outputs.image_name }}"
-          FIRST_DEPLOY="${{ steps.detect.outputs.first_deployment }}"
-          
-          echo "🚀 Deploying to $TARGET environment..."
-          
-          if [ "$FIRST_DEPLOY" == "true" ]; then
-            # First deployment - deploy blue only
-            echo "First deployment: Creating blue environment with load balancer"
-            terraform apply -auto-approve \
-              -var="blue_image=$IMAGE" \
-              -var="active_environment=blue" \
-              -var="deploy_blue=true" \
-              -var="deploy_green=false"
-          elif [ "$TARGET" == "blue" ]; then
-            # Deploy to blue, keep green active temporarily
-            echo "Deploying to blue (green is currently active)"
-            terraform apply -auto-approve \
-              -var="blue_image=$IMAGE" \
-              -var="active_environment=green" \
-              -var="deploy_blue=true" \
-              -var="deploy_green=true" \
-              -var="blue_instance_count=2" \
-              -var="green_instance_count=2"
-          else
-            # Deploy to green, keep blue active temporarily
-            echo "Deploying to green (blue is currently active)"
-            terraform apply -auto-approve \
-              -var="green_image=$IMAGE" \
-              -var="active_environment=blue" \
-              -var="deploy_blue=true" \
-              -var="deploy_green=true" \
-              -var="blue_instance_count=2" \
-              -var="green_instance_count=2"
-          fi
-
-      - name: Wait for New Environment to be Ready
-        run: |
-          TARGET="${{ steps.detect.outputs.target_env }}"
-          echo "⏳ Waiting for $TARGET instances to be ready..."
-          sleep 90
-
-      - name: Health Check New Environment
-        id: health
-        working-directory: ./terraform
-        run: |
-          TARGET="${{ steps.detect.outputs.target_env }}"
-          FIRST_DEPLOY="${{ steps.detect.outputs.first_deployment }}"
-          
-          echo "🏥 Checking health of $TARGET environment..."
-          
-          # Get MIG name
-          if [ "$TARGET" == "blue" ]; then
-            MIG_NAME="blue-mig"
-          else
-            MIG_NAME="green-mig"
-          fi
-          
-          # Check MIG health
-          MAX_RETRIES=20
-          RETRY_COUNT=0
-          HEALTHY=false
-          
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            STATUS=$(gcloud compute instance-groups managed describe $MIG_NAME \
-              --zone=${{ env.GCP_ZONE }} \
-              --format="value(status.isStable)" 2>/dev/null || echo "false")
-            
-            if [ "$STATUS" == "True" ]; then
-              echo "✅ $TARGET MIG is stable and healthy"
-              HEALTHY=true
-              break
-            fi
-            
-            echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES: MIG not stable yet..."
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            sleep 15
-          done
-          
-          if [ "$HEALTHY" == "false" ]; then
-            echo "❌ $TARGET environment failed health check"
-            exit 1
-          fi
-          
-          echo "health_passed=true" >> $GITHUB_OUTPUT
-
-      - name: Switch Traffic to New Environment
-        working-directory: ./terraform
-        env:
-          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-          TF_VAR_region: ${{ env.GCP_REGION }}
-          TF_VAR_zone: ${{ env.GCP_ZONE }}
-        run: |
-          TARGET="${{ steps.detect.outputs.target_env }}"
-          OLD="${{ steps.detect.outputs.old_env }}"
-          IMAGE="${{ steps.image.outputs.image_name }}"
-          FIRST_DEPLOY="${{ steps.detect.outputs.first_deployment }}"
-          
-          if [ "$FIRST_DEPLOY" == "true" ]; then
-            echo "✅ First deployment complete - blue is already active"
-          else
-            echo "🔄 Switching traffic from $OLD to $TARGET..."
-            
-            if [ "$TARGET" == "blue" ]; then
-              terraform apply -auto-approve \
-                -var="blue_image=$IMAGE" \
-                -var="active_environment=blue" \
-                -var="deploy_blue=true" \
-                -var="deploy_green=true" \
-                -var="blue_instance_count=2" \
-                -var="green_instance_count=2"
-            else
-              terraform apply -auto-approve \
-                -var="green_image=$IMAGE" \
-                -var="active_environment=green" \
-                -var="deploy_blue=true" \
-                -var="deploy_green=true" \
-                -var="blue_instance_count=2" \
-                -var="green_instance_count=2"
-            fi
-            
-            echo "✅ Traffic switched to $TARGET"
-          fi
-
-      - name: Scale Down Old Environment
-        working-directory: ./terraform
-        env:
-          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-          TF_VAR_region: ${{ env.GCP_REGION }}
-          TF_VAR_zone: ${{ env.GCP_ZONE }}
-        run: |
-          TARGET="${{ steps.detect.outputs.target_env }}"
-          OLD="${{ steps.detect.outputs.old_env }}"
-          IMAGE="${{ steps.image.outputs.image_name }}"
-          FIRST_DEPLOY="${{ steps.detect.outputs.first_deployment }}"
-          
-          if [ "$FIRST_DEPLOY" == "true" ]; then
-            echo "✅ First deployment - no old environment to scale down"
-          else
-            echo "📉 Scaling down $OLD environment to 0 instances (keeping for rollback)..."
-            
-            if [ "$TARGET" == "blue" ]; then
-              # Blue is new active, scale down green
-              terraform apply -auto-approve \
-                -var="blue_image=$IMAGE" \
-                -var="active_environment=blue" \
-                -var="deploy_blue=true" \
-                -var="deploy_green=true" \
-                -var="blue_instance_count=2" \
-                -var="green_instance_count=0"
-            else
-              # Green is new active, scale down blue
-              terraform apply -auto-approve \
-                -var="green_image=$IMAGE" \
-                -var="active_environment=green" \
-                -var="deploy_blue=true" \
-                -var="deploy_green=true" \
-                -var="blue_instance_count=0" \
-                -var="green_instance_count=2"
-            fi
-            
-            echo "✅ $OLD scaled down to 0 instances"
-            echo "📝 Infrastructure kept for quick rollback if needed"
-          fi
-
-      - name: Get Deployment Info
-        working-directory: ./terraform
-        id: outputs
-        run: |
-          LB_IP=$(terraform output -raw lb_ip_address 2>/dev/null || echo "")
-          ACTIVE=$(terraform output -raw active_environment 2>/dev/null || echo "")
-          echo "lb_ip=$LB_IP" >> $GITHUB_OUTPUT
-          echo "active=$ACTIVE" >> $GITHUB_OUTPUT
-
-      - name: Verify Traffic via Load Balancer
-        env:
-          LB_IP: ${{ steps.outputs.outputs.lb_ip }}
-          TARGET: ${{ steps.detect.outputs.target_env }}
-        run: |
-          echo "🔍 Verifying traffic through load balancer..."
-          
-          MAX_RETRIES=20
-          RETRY_COUNT=0
-          
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$LB_IP/api/health" || echo "000")
-            
-            if [ "$HTTP_STATUS" -eq 200 ]; then
-              echo "✅ Load balancer is responding!"
-              RESPONSE=$(curl -s "http://$LB_IP/api/health")
-              echo "$RESPONSE" | jq . || echo "$RESPONSE"
-              
-              # Verify correct environment is responding
-              ENV=$(echo "$RESPONSE" | jq -r '.environment' 2>/dev/null || echo "unknown")
-              if [ "$ENV" == "$TARGET" ]; then
-                echo "✅ Confirmed: $TARGET environment is serving traffic"
-              else
-                echo "⚠️  Warning: $ENV environment is responding (expected $TARGET)"
-              fi
-              break
-            fi
-            
-            echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES: HTTP $HTTP_STATUS"
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            sleep 15
-          done
-          
-          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-            echo "⚠️  Could not verify traffic within timeout"
-          fi
-
-      - name: Deployment Summary
-        if: always()
-        env:
-          IMAGE_NAME: ${{ steps.image.outputs.image_name }}
-          LB_IP: ${{ steps.outputs.outputs.lb_ip }}
-          ACTIVE: ${{ steps.outputs.outputs.active }}
-          TARGET: ${{ steps.detect.outputs.target_env }}
-          OLD: ${{ steps.detect.outputs.old_env }}
-          FIRST: ${{ steps.detect.outputs.first_deployment }}
-        run: |
-          echo "=========================================="
-          echo "🎉 Blue-Green Deployment Complete"
-          echo "=========================================="
-          echo ""
-          echo "Image Deployed: $IMAGE_NAME"
-          echo "Load Balancer: http://$LB_IP"
-          echo ""
-          if [ "$FIRST" == "true" ]; then
-            echo "✅ Initial deployment to blue completed"
-            echo "📊 Blue: 2 instances (active)"
-          else
-            echo "✅ Deployed to: $TARGET"
-            echo "✅ Traffic switched to: $TARGET"
-            echo "📉 Old environment ($OLD) scaled to 0"
-            echo ""
-            echo "📊 Current State:"
-            if [ "$TARGET" == "blue" ]; then
-              echo "  Blue: 2 instances (active) ✅"
-              echo "  Green: 0 instances (standby)"
-            else
-              echo "  Blue: 0 instances (standby)"
-              echo "  Green: 2 instances (active) ✅"
-            fi
-          fi
-          echo ""
-          echo "🧪 Test Commands:"
-          echo "  curl http://$LB_IP/api/health"
-          echo "  curl http://$LB_IP/api/version"
-          echo ""
-          echo "🔄 Next Deployment:"
-          echo "  Run 'build-image' workflow with new version"
-          echo "  Run this 'deploy' workflow again"
-          if [ "$TARGET" == "blue" ]; then
-            echo "  → Will auto-deploy to green and switch traffic"
-          else
-            echo "  → Will auto-deploy to blue and switch traffic"
-          fi
-          echo ""
-          echo "↩️  Rollback (if needed):"
-          echo "  Run 'rollback' workflow to switch back to $OLD"
+          echo "URL: http://$LB"

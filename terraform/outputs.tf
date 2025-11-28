@@ -111,13 +111,11 @@ output "deployment_summary" {
     
     Blue Environment:
       - Image: ${var.blue_image}
-      - Version: ${var.blue_version}
       - Instances: ${var.blue_instance_count}
       - Status: ${var.active_environment == "blue" ? "🔵 ACTIVE" : "⚪ STANDBY"}
     
     Green Environment:
       - Image: ${var.green_image}
-      - Version: ${var.green_version}
       - Instances: ${var.green_instance_count}
       - Status: ${var.active_environment == "green" ? "🟢 ACTIVE" : "⚪ STANDBY"}
   EOT
