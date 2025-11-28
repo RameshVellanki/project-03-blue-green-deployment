@@ -66,11 +66,33 @@ jobs:
         run: |
           echo "Building custom image with Packer..."
           packer build -color=false image.pkr.hcl | tee packer-output.txt
+          
+          # Display full output for debugging
+          echo "=== Packer Output ==="
+          cat packer-output.txt
 
       - name: Extract Image Name
         id: image
         run: |
-          IMAGE_NAME=$(grep -oP 'A disk image was created: \K[^\s]+' packer/packer-output.txt || echo "webapp-image-${{ github.sha }}")
+          # Extract image name from packer-manifest.json
+          if [ -f "packer/packer-manifest.json" ]; then
+            IMAGE_NAME=$(jq -r '.builds[-1].artifact_id' packer/packer-manifest.json | cut -d: -f2)
+            echo "Extracted image from manifest: $IMAGE_NAME"
+          else
+            # Fallback: try to get latest image from the webapp family
+            IMAGE_NAME=$(gcloud compute images list \
+              --filter="family:webapp" \
+              --format="value(name)" \
+              --sort-by="~creationTimestamp" \
+              --limit=1)
+            echo "Retrieved latest image from GCP: $IMAGE_NAME"
+          fi
+          
+          if [ -z "$IMAGE_NAME" ]; then
+            echo "❌ Failed to extract image name"
+            exit 1
+          fi
+          
           echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
           echo "Built image: $IMAGE_NAME"
 
@@ -94,10 +116,11 @@ jobs:
             --machine-type=e2-micro \
             --image="$IMAGE_NAME" \
             --tags=http-server \
+            --metadata=environment=test,app_version=1.0.0 \
             --scopes=cloud-platform
           
           echo "Waiting for instance to start..."
-          sleep 60
+          sleep 90
           
           INSTANCE_IP=$(gcloud compute instances describe "$TEST_INSTANCE" \
             --zone="${{ env.GCP_ZONE }}" \
@@ -109,11 +132,11 @@ jobs:
           RETRY_COUNT=0
           
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$INSTANCE_IP:8080/health" || echo "000")
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$INSTANCE_IP:8080/api/health" || echo "000")
             
             if [ "$HTTP_STATUS" -eq 200 ]; then
               echo "✅ Image test successful!"
-              curl -s "http://$INSTANCE_IP:8080/health" | jq .
+              curl -s "http://$INSTANCE_IP:8080/api/health" | jq .
               break
             fi
             
@@ -136,9 +159,10 @@ jobs:
           echo "Packer Build Summary"
           echo "=========================================="
           echo "Image Name: $IMAGE_NAME"
-          echo "Image Family: webapp-image"
+          echo "Image Family: webapp"
           echo "Project: ${{ secrets.GCP_PROJECT_ID }}"
           echo "Region: ${{ env.GCP_REGION }}"
           echo ""
           echo "Use this image for blue-green deployment:"
-          echo "  TF_VAR_custom_image=$IMAGE_NAME"
+          echo "  TF_VAR_blue_image=$IMAGE_NAME"
+          echo "  TF_VAR_green_image=$IMAGE_NAME"
