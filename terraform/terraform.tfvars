@@ -6,8 +6,9 @@ region     = "us-central1"
 zone       = "us-central1-a"
 
 # Image names (built with Packer)
-blue_image  = "webapp-blue-green-v1-0-0-20250101000000"
-green_image = "webapp-blue-green-v2-0-0-20250101000000"
+# These will be overridden by workflow environment variables
+blue_image  = "webapp-blue-green-1-0-0-latest"
+green_image = "webapp-blue-green-1-0-0-latest"
 
 # Active environment (blue or green)
 active_environment = "blue"

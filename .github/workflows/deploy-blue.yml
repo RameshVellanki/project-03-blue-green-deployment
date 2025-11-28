@@ -74,11 +74,12 @@ jobs:
           TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
           TF_VAR_region: ${{ env.GCP_REGION }}
           TF_VAR_zone: ${{ env.GCP_ZONE }}
-          TF_VAR_blue_image: ${{ steps.image.outputs.image_name }}
-          TF_VAR_active_environment: "blue"
         run: |
           echo "Deploying blue environment..."
+          echo "Using image: ${{ steps.image.outputs.image_name }}"
           terraform apply -auto-approve \
+            -var="blue_image=${{ steps.image.outputs.image_name }}" \
+            -var="active_environment=blue" \
             -target=google_service_account.blue_sa \
             -target=google_project_iam_member.blue_logging \
             -target=google_project_iam_member.blue_monitoring \
