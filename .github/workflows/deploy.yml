@@ -157,6 +157,32 @@ jobs:
               -var="green_instance_count=2"
           fi
 
+      - name: Force Scale Down
+        if: steps.detect.outputs.first == 'false'
+        run: |
+          TARGET="${{ steps.detect.outputs.target }}"
+          
+          # Force scale down the inactive environment
+          if [ "$TARGET" == "blue" ]; then
+            echo "🔽 Forcing green to scale down to 0..."
+            gcloud compute instance-groups managed set-autoscaling green-mig \
+              --zone=${{ env.GCP_ZONE }} \
+              --mode=off || true
+            gcloud compute instance-groups managed resize green-mig \
+              --zone=${{ env.GCP_ZONE }} \
+              --size=0
+            echo "✅ Green scaled to 0"
+          else
+            echo "🔽 Forcing blue to scale down to 0..."
+            gcloud compute instance-groups managed set-autoscaling blue-mig \
+              --zone=${{ env.GCP_ZONE }} \
+              --mode=off || true
+            gcloud compute instance-groups managed resize blue-mig \
+              --zone=${{ env.GCP_ZONE }} \
+              --size=0
+            echo "✅ Blue scaled to 0"
+          fi
+
       - name: Get Info
         id: info
         working-directory: ./terraform
