@@ -1,3 +1,24 @@
+# Service Account for Green Environment
+resource "google_service_account" "green_sa" {
+  account_id   = "webapp-green-sa"
+  display_name = "Service Account for Green Environment"
+  description  = "Custom service account for green environment instances with minimal permissions"
+}
+
+# IAM: Green Logging
+resource "google_project_iam_member" "green_logging" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.green_sa.email}"
+}
+
+# IAM: Green Monitoring
+resource "google_project_iam_member" "green_monitoring" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.green_sa.email}"
+}
+
 # Green Environment Instance Template
 resource "google_compute_instance_template" "green" {
   name_prefix  = "green-template-"
@@ -27,7 +48,7 @@ resource "google_compute_instance_template" "green" {
   }
 
   service_account {
-    email  = google_service_account.webapp_sa.email
+    email  = google_service_account.green_sa.email
     scopes = ["cloud-platform"]
   }
 
@@ -77,9 +98,9 @@ resource "google_compute_instance_group_manager" "green" {
 
   depends_on = [
     google_compute_instance_template.green,
-    google_service_account.webapp_sa,
-    google_project_iam_member.webapp_logging,
-    google_project_iam_member.webapp_monitoring
+    google_service_account.green_sa,
+    google_project_iam_member.green_logging,
+    google_project_iam_member.green_monitoring
   ]
 }
 

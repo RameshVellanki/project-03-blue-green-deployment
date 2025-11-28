@@ -1,3 +1,24 @@
+# Service Account for Blue Environment
+resource "google_service_account" "blue_sa" {
+  account_id   = "webapp-blue-sa"
+  display_name = "Service Account for Blue Environment"
+  description  = "Custom service account for blue environment instances with minimal permissions"
+}
+
+# IAM: Blue Logging
+resource "google_project_iam_member" "blue_logging" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.blue_sa.email}"
+}
+
+# IAM: Blue Monitoring
+resource "google_project_iam_member" "blue_monitoring" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.blue_sa.email}"
+}
+
 # Blue Environment Instance Template
 resource "google_compute_instance_template" "blue" {
   name_prefix  = "blue-template-"
@@ -27,7 +48,7 @@ resource "google_compute_instance_template" "blue" {
   }
 
   service_account {
-    email  = google_service_account.webapp_sa.email
+    email  = google_service_account.blue_sa.email
     scopes = ["cloud-platform"]
   }
 
@@ -77,9 +98,9 @@ resource "google_compute_instance_group_manager" "blue" {
 
   depends_on = [
     google_compute_instance_template.blue,
-    google_service_account.webapp_sa,
-    google_project_iam_member.webapp_logging,
-    google_project_iam_member.webapp_monitoring
+    google_service_account.blue_sa,
+    google_project_iam_member.blue_logging,
+    google_project_iam_member.blue_monitoring
   ]
 }
 
